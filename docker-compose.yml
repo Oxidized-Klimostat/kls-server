@@ -1,0 +1,53 @@
+version: "3"
+
+services:
+
+  postgres:
+    image: timescale/timescaledb:latest-pg15
+    ports:
+      - 127.0.0.1:5432:5432
+    environment:
+      - POSTGRES_PASSWORD=${PG_PASS:?err}
+#    volumes:
+#      - ./pgdata:/home/postgres/pgdata/data
+
+  postgres_setup: # https://stackoverflow.com/a/64153124
+    image: timescale/timescaledb:latest-pg15
+    restart: "no"
+    environment:
+      - PGPASSWORD=${PG_PASS:?err}
+    entrypoint: ["sh", "-c", " \
+      sleep 3; psql postgres -U postgres -h postgres -p 5432 -c \" \
+
+        create schema api; \
+        create table api.todos ( \
+          id serial primary key, \
+          done boolean not null default false, \
+          task text not null, \
+          due timestamptz \
+        ); \
+        insert into api.todos (task) values \
+          ('finish tutorial 0'), ('pat self on back'); \
+
+        create role anon nologin; \
+
+        grant usage on schema api to anon; \
+        grant select on api.todos to anon; \
+
+        create role authenticator noinherit login password '${AUTH_PASS:?err}'; \
+        grant anon to authenticator; \
+
+      \"; echo \"postgres setup done\""]
+    depends_on:
+      - postgres
+
+  api:
+    image: postgrest/postgrest:latest
+    ports:
+      - 3000:3000
+    environment:
+      - PGRST_DB_URI=postgres://authenticator:${AUTH_PASS:?err}@postgres:5432/postgres
+      - PGRST_DB_SCHEMAS=api
+      - PGRST_DB_ANON_ROLE=anon
+    depends_on:
+      - postgres_setup
