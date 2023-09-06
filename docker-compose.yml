@@ -7,26 +7,39 @@ services:
     ports:
       - 127.0.0.1:5432:5432 # only for development purposes
     environment:
-      - POSTGRES_PASSWORD=${PG_PASS:?err}
-      - AUTH_PASS=${AUTH_PASS:?err}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
     volumes:
       - ./scripts/setup.sh:/docker-entrypoint-initdb.d/setup.sh
       - ./scripts/setup.sql:/setup.sql
     healthcheck:
-      test: ["CMD", "pg_isready", "-d", "postgres"]
+      test: ["CMD", "pg_isready", "-d", "postgres", "-U", "postgres"]
       interval: 3s
       timeout: 5s
       retries: 5
       start_period: 1s
+    secrets:
+      - postgres_password
+      - auth_pass
 
   api:
     image: postgrest/postgrest:latest
     ports:
       - 3000:3000
     environment: # https://postgrest.org/en/stable/references/configuration.html#environment-variables
-      - PGRST_DB_URI=postgres://authenticator:${AUTH_PASS:?err}@postgres:5432/postgres
-      - PGRST_DB_ANON_ROLE=anon
+      PGHOST: postgres
+      PGPORT: 5432
+      PGUSER: authenticator
+      PGDATABASE: postgres
+      PGRST_DB_ANON_ROLE: anon
+    command: /bin/sh -c "PGPASSWORD=$(cat /run/secrets/auth_pass) postgrest"
     depends_on:
       postgres:
         condition: service_healthy
+    secrets:
+      - auth_pass
 
+secrets:
+  postgres_password:
+    environment: "POSTGRES_PASSWORD"
+  auth_pass:
+    environment: "AUTH_PASS"
