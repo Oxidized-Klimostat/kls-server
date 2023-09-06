@@ -8,21 +8,16 @@ services:
       - 127.0.0.1:5432:5432 # only for development purposes
     environment:
       - POSTGRES_PASSWORD=${PG_PASS:?err}
-#    volumes:
-#      - ./pgdata:/home/postgres/pgdata/data
-
-  postgres_setup: # https://stackoverflow.com/a/64153124
-    image: timescale/timescaledb:latest-pg15
-    restart: "no"
-    environment:
-      - PGPASSWORD=${PG_PASS:?err}
-    entrypoint: ["sh", "-c", " \
-      sleep 3; psql postgres -U postgres -h postgres -p 5432 --set=auth_pass=\"${AUTH_PASS:?err}\" -f /setup.sql; \
-      echo \"postgres setup done\""]
+      - AUTH_PASS=${AUTH_PASS:?err}
     volumes:
-      - ./setup.sql:/setup.sql
-    depends_on:
-      - postgres
+      - ./scripts/setup.sh:/docker-entrypoint-initdb.d/setup.sh
+      - ./scripts/setup.sql:/setup.sql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-d", "postgres"]
+      interval: 3s
+      timeout: 5s
+      retries: 5
+      start_period: 1s
 
   api:
     image: postgrest/postgrest:latest
@@ -32,4 +27,6 @@ services:
       - PGRST_DB_URI=postgres://authenticator:${AUTH_PASS:?err}@postgres:5432/postgres
       - PGRST_DB_ANON_ROLE=anon
     depends_on:
-      - postgres_setup
+      postgres:
+        condition: service_healthy
+
