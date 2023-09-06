@@ -22,7 +22,6 @@ services:
       - auth_pass
 
   api:
-    image: postgrest/postgrest:latest
     ports:
       - 3000:3000
     environment: # https://postgrest.org/en/stable/references/configuration.html#environment-variables
@@ -31,7 +30,16 @@ services:
       PGUSER: authenticator
       PGDATABASE: postgres
       PGRST_DB_ANON_ROLE: anon
-    command: /bin/sh -c "PGPASSWORD=$(cat /run/secrets/auth_pass) postgrest"
+    build: # https://github.com/PostgREST/postgrest/tree/main/nix/tools/docker https://github.com/PostgREST/postgrest/blob/main/.github/scripts/arm/docker-env/Dockerfile
+      dockerfile_inline: |
+        FROM debian:bookworm AS builder
+        RUN apt-get update && apt-get install -y bash-static
+
+        FROM postgrest/postgrest
+        COPY --from=builder /usr/bin/bash-static /bin/bash-static
+        EXPOSE 3000
+        USER 1000
+    command: /bin/bash-static -c "PGPASSWORD=$(</run/secrets/auth_pass) /bin/postgrest"
     depends_on:
       postgres:
         condition: service_healthy
