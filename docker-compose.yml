@@ -3,14 +3,19 @@ version: "3"
 services:
 
   postgres:
-    image: timescale/timescaledb:latest-pg15
+    build:
+      dockerfile_inline: |
+        FROM timescale/timescaledb:latest-pg15
+        RUN apk add make git && \
+          git clone https://github.com/michelp/pgjwt.git && \
+          cd pgjwt && \
+          make install
     ports:
       - 127.0.0.1:5432:5432 # only for development purposes
     environment:
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
     volumes:
-      - ./scripts/setup.sh:/docker-entrypoint-initdb.d/setup.sh
-      - ./scripts/setup.sql:/setup.sql
+      - ./setup.sql:/docker-entrypoint-initdb.d/setup.sql
     healthcheck:
       test: ["CMD", "pg_isready", "-d", "postgres", "-U", "postgres"]
       interval: 3s
@@ -20,8 +25,18 @@ services:
     secrets:
       - postgres_password
       - auth_pass
+      - jwt_secret
 
   api:
+    # https://github.com/PostgREST/postgrest/tree/main/nix/tools/docker
+    # https://github.com/PostgREST/postgrest/blob/main/.github/scripts/arm/docker-env/Dockerfile
+    build:
+      dockerfile_inline: |
+        FROM debian:bookworm AS builder
+        RUN apt-get update && apt-get install -y bash-static
+
+        FROM postgrest/postgrest
+        COPY --from=builder /usr/bin/bash-static /bin/bash-static
     ports:
       - 3000:3000
     environment: # https://postgrest.org/en/stable/references/configuration.html#environment-variables
@@ -30,15 +45,6 @@ services:
       PGUSER: authenticator
       PGDATABASE: postgres
       PGRST_DB_ANON_ROLE: anon
-# https://github.com/PostgREST/postgrest/tree/main/nix/tools/docker
-# https://github.com/PostgREST/postgrest/blob/main/.github/scripts/arm/docker-env/Dockerfile
-    build:
-      dockerfile_inline: |
-        FROM debian:bookworm AS builder
-        RUN apt-get update && apt-get install -y bash-static
-
-        FROM postgrest/postgrest
-        COPY --from=builder /usr/bin/bash-static /bin/bash-static
     command: /bin/bash-static -c "PGPASSWORD=$(</run/secrets/auth_pass) /bin/postgrest"
     depends_on:
       postgres:
@@ -51,3 +57,5 @@ secrets:
     environment: "POSTGRES_PASSWORD"
   auth_pass:
     environment: "AUTH_PASS"
+  jwt_secret:
+    environment: "JWT_SECRET"
