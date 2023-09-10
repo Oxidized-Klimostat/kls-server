@@ -13,6 +13,25 @@ CREATE TABLE IF NOT EXISTS stations (
   created timestamptz not null
 );
 
+CREATE TABLE IF NOT EXISTS sensor_scd30 (
+  station integer,
+  ts timestamptz not null,
+  co2 real not null,
+  humidity real not null,
+  temperature real not null,
+  primary key (station, ts),
+  constraint fk_scd30_stations foreign key (station) REFERENCES stations (id)
+);
+
+CREATE TABLE IF NOT EXISTS sensor_ccs811 (
+  station integer,
+  ts timestamptz not null,
+  eco2 real not null,
+  etvoc real not null,
+  primary key (station, ts),
+  constraint fk_ccs811_stations foreign key (station) REFERENCES stations (id)
+);
+
 
 CREATE OR REPLACE FUNCTION add_station(description text) RETURNS RECORD AS $$
 DECLARE
@@ -66,7 +85,11 @@ CREATE OR REPLACE FUNCTION jwt_test() RETURNS text AS $$
 $$ LANGUAGE sql;
 
 
-CREATE ROLE anon nologin;
 
 CREATE ROLE authenticator noinherit LOGIN PASSWORD :'auth_pass';
+CREATE ROLE anon nologin;
+CREATE ROLE station nologin;
+
 GRANT anon TO authenticator;
+GRANT station TO authenticator;
+GRANT INSERT ON sensor_scd30, sensor_ccs811 TO station;
