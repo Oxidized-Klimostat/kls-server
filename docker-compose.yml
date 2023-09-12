@@ -38,13 +38,15 @@ services:
         FROM postgrest/postgrest
         COPY --from=builder /usr/bin/bash-static /bin/bash-static
     ports:
-      - 3000:3000
+      - 3095:3000
     environment: # https://postgrest.org/en/stable/references/configuration.html#environment-variables
       PGHOST: postgres
       PGPORT: 5432
       PGUSER: authenticator
       PGDATABASE: postgres
+      PGRST_DB_SCHEMAS: api
       PGRST_DB_ANON_ROLE: anon
+      PGRST_OPENAPI_MODE: follow-privileges # prod: disabled
     command: /bin/bash-static -c "PGPASSWORD=$(</run/secrets/auth_pass) PGRST_JWT_SECRET=$(</run/secrets/jwt_secret) /bin/postgrest"
     depends_on:
       postgres:

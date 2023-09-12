@@ -5,56 +5,62 @@ CREATE EXTENSION pgjwt CASCADE;
 
 ALTER DATABASE postgres SET "kls.jwt_secret" TO :'jwt_secret';
 
+CREATE SCHEMA api;
+CREATE SCHEMA kls;
 
-CREATE TABLE IF NOT EXISTS stations (
+
+CREATE TABLE IF NOT EXISTS kls.stations (
   id serial primary key,
   token text not null,
   description text not null,
   created timestamptz not null
 );
 
-CREATE TABLE IF NOT EXISTS sensor_scd30 (
+CREATE TABLE IF NOT EXISTS api.sensor_scd30 (
   station integer,
-  ts timestamptz not null,
+  ts timestamptz not null DEFAULT now(),
   co2 real not null,
   humidity real not null,
   temperature real not null,
   primary key (station, ts),
-  constraint fk_scd30_stations foreign key (station) REFERENCES stations (id)
+  constraint fk_scd30_stations foreign key (station) REFERENCES kls.stations (id)
 );
 
-CREATE TABLE IF NOT EXISTS sensor_ccs811 (
+CREATE TABLE IF NOT EXISTS api.sensor_ccs811 (
   station integer,
-  ts timestamptz not null,
-  eco2 real not null,
-  etvoc real not null,
+  ts timestamptz not null DEFAULT now(),
+  eco2 integer not null,
+  etvoc integer not null,
   primary key (station, ts),
-  constraint fk_ccs811_stations foreign key (station) REFERENCES stations (id)
+  constraint fk_ccs811_stations foreign key (station) REFERENCES kls.stations (id)
 );
 
+SELECT create_hypertable('api.sensor_scd30', 'ts');
+SELECT create_hypertable('api.sensor_ccs811', 'ts');
 
-CREATE OR REPLACE FUNCTION add_station(description text) RETURNS RECORD AS $$
+
+CREATE OR REPLACE FUNCTION api.create_station(description text) RETURNS RECORD AS $$
 DECLARE
-  uuid text := gen_random_uuid();
+  station_token text := encode(public.digest(gen_random_uuid()::text, 'sha256'), 'hex');
   ret RECORD;
   station_id integer;
 BEGIN
-  INSERT INTO stations (token, description, created) VALUES
-    (crypt(uuid, gen_salt('bf')), description, now()) RETURNING id INTO station_id;
+  INSERT INTO kls.stations (token, description, created) VALUES
+    (public.crypt(station_token, public.gen_salt('bf')), description, now()) RETURNING id INTO station_id;
 
-  SELECT uuid, station_id INTO ret;
+  SELECT station_token, station_id INTO ret;
   RETURN ret;
 END
 $$ LANGUAGE plpgsql;
 
 
-CREATE OR REPLACE FUNCTION auth_station(check_id integer, check_token text) RETURNS text AS $$
+CREATE OR REPLACE FUNCTION api.auth_station(check_id integer, check_token text) RETURNS text AS $$
 DECLARE
   stored_token text;
   jwt_token text;
 BEGIN
-  SELECT token FROM stations WHERE id = check_id INTO stored_token;
-  IF NOT stored_token = crypt(check_token, stored_token) THEN
+  SELECT token FROM kls.stations WHERE id = check_id INTO stored_token;
+  IF NOT stored_token = public.crypt(check_token, stored_token) THEN
     raise invalid_password using message = 'invalid station_id or token';
   END IF;
 
@@ -64,7 +70,7 @@ BEGIN
   FROM (
     SELECT
       'station'::text as role,
-      extract(epoch from now())::integer + 30 AS exp
+      extract(epoch from now())::integer + 300 AS exp
   ) r
   INTO jwt_token;
   RETURN jwt_token;
@@ -72,24 +78,16 @@ END
 $$ LANGUAGE plpgsql;
 
 
-
-CREATE OR REPLACE FUNCTION jwt_test() RETURNS text AS $$
-  SELECT public.sign(
-    row_to_json(r), current_setting('kls.jwt_secret')
-  ) AS token
-  FROM (
-    SELECT
-      'my_role'::text as role,
-      extract(epoch from now())::integer + 300 AS exp
-  ) r;
-$$ LANGUAGE sql;
-
-
-
 CREATE ROLE authenticator noinherit LOGIN PASSWORD :'auth_pass';
 CREATE ROLE anon nologin;
 CREATE ROLE station nologin;
 
+GRANT USAGE ON SCHEMA api, kls to anon;
+GRANT USAGE ON SCHEMA api to station;
+
 GRANT anon TO authenticator;
 GRANT station TO authenticator;
-GRANT INSERT ON sensor_scd30, sensor_ccs811 TO station;
+
+GRANT INSERT ON api.sensor_scd30, api.sensor_ccs811 TO station;
+GRANT SELECT ON kls.stations TO anon;
+GRANT EXECUTE ON FUNCTION api.auth_station TO anon;
