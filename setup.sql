@@ -78,6 +78,67 @@ END
 $$ LANGUAGE plpgsql;
 
 
+-------------------- Authentication
+
+CREATE TABLE IF NOT EXISTS kls.users (
+  username text PRIMARY KEY,
+  password text NOT NULL,
+  role name NOT NULL
+);
+
+-- ensure role for user exists
+CREATE OR REPLACE FUNCTION
+kls.check_role_exists() RETURNS TRIGGER AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles AS r WHERE r.rolename = new.role) THEN
+    RAISE FOREIGN_KEY_VIOLATION USING MESSAGE =
+      'unknown database role: ' || new.role;
+    RETURN NULL;
+  END IF;
+  RETURN NEW;
+END
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS ensure_user_roles_exists ON kls.users;
+CREATE CONSTRAINT TRIGGER ensure_user_roles_exists
+  AFTER INSERT OR UPDATE ON kls.users
+  FOR EACH ROW
+  EXECUTE PROCEDURE kls.check_role_exists();
+
+-- hash password
+create or replace function
+kls.encrypt_pass() returns trigger as $$
+begin
+  if tg_op = 'INSERT' or new.pass <> old.pass then
+    new.pass = crypt(new.pass, gen_salt('bf'));
+  end if;
+  return new;
+end
+$$ language plpgsql;
+
+drop trigger if exists encrypt_pass on kls.users;
+create trigger encrypt_pass
+  before insert or update on kls.users
+  for each row
+  execute procedure kls.encrypt_pass();
+
+
+-- get role for give user
+create or replace function
+kls.user_role(username text, password text) returns name
+  language plpgsql
+  as $$
+begin
+  return (
+  select role from kls.users
+   where users.username = user_role.username
+     and users.password = crypt(user_role.password, users.password)
+  );
+end;
+$$;
+
+
+
 CREATE ROLE authenticator noinherit LOGIN PASSWORD :'auth_pass';
 CREATE ROLE anon nologin;
 CREATE ROLE station nologin;
