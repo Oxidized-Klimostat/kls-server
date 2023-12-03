@@ -5,7 +5,7 @@ services:
   postgres:
     build:
       dockerfile_inline: |
-        FROM timescale/timescaledb:latest-pg15
+        FROM timescale/timescaledb:latest-pg16
         RUN apk add make git && \
           git clone https://github.com/michelp/pgjwt.git && \
           cd pgjwt && \
